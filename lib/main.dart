@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
 
 void main() {
   runApp(const ZayanMediaApp());
@@ -72,7 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _folderController = TextEditingController();
   Directory? _albumDirectory;
-  final Set<String> _folders = {'Pictures'};
+  final Set<String> _folders = {'Pictures', 'Videos'};
   bool _showOnlyFavorites = false;
 
   @override
@@ -108,6 +109,16 @@ class _HomeScreenState extends State<HomeScreen> {
           .map((item) => MediaItem.fromJson(item as Map<String, dynamic>))
           .where((item) => File(item.path).existsSync())
           .toList();
+      final videosDirectory = Directory('${directory.path}${Platform.pathSeparator}Videos');
+      await videosDirectory.create(recursive: true);
+      for (final item in items.where((item) => item.isVideo && item.folder == 'Pictures')) {
+        final targetPath = '${videosDirectory.path}${Platform.pathSeparator}${_fileName(item.path)}';
+        if (item.path != targetPath && !await File(targetPath).exists()) {
+          await File(item.path).rename(targetPath);
+          item.path = targetPath;
+          item.folder = 'Videos';
+        }
+      }
       final folders = (decoded['folders'] as List<dynamic>? ?? []).whereType<String>();
       if (!mounted) return;
       setState(() {
@@ -161,7 +172,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<MediaItem> _importFile(String sourcePath, {required bool isVideo}) async {
     final directory = _albumDirectory ?? await _getAlbumDirectory();
     _albumDirectory = directory;
-    final folder = Directory('${directory.path}${Platform.pathSeparator}Pictures');
+    final folderName = isVideo ? 'Videos' : 'Pictures';
+    final folder = Directory('${directory.path}${Platform.pathSeparator}$folderName');
     await folder.create(recursive: true);
     final sourceName = sourcePath.split(RegExp(r'[\\/]')).last;
     final dot = sourceName.lastIndexOf('.');
@@ -176,7 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
       counter++;
     }
     await File(sourcePath).copy(destination.path);
-    return MediaItem(path: destination.path, isVideo: isVideo);
+    return MediaItem(path: destination.path, isVideo: isVideo, folder: folderName);
   }
 
   void _applyFilter() {
@@ -342,6 +354,15 @@ class _HomeScreenState extends State<HomeScreen> {
     await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], text: item.title));
   }
 
+  Future<void> _openInEditingApp(MediaItem item) async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(item.path)],
+        text: 'Open this ${item.isVideo ? 'video' : 'picture'} in an editing app',
+      ),
+    );
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
@@ -405,9 +426,7 @@ class _HomeScreenState extends State<HomeScreen> {
             itemBuilder: (context, index) {
               final item = _filteredList[index];
               if (item.isVideo) {
-                return const Center(
-                  child: Icon(Icons.play_circle_fill, color: Colors.white, size: 80),
-                );
+                return VideoViewer(path: item.path);
               }
               return InteractiveViewer(
                 minScale: 0.5,
@@ -638,6 +657,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                           case 'share':
                                             _shareMedia(item);
                                             break;
+                                          case 'edit':
+                                            _openInEditingApp(item);
+                                            break;
                                           case 'delete':
                                             _deleteMedia(index);
                                             break;
@@ -649,6 +671,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         PopupMenuItem(value: 'copy', child: Text('Copy to folder')),
                                         PopupMenuItem(value: 'move', child: Text('Move to folder')),
                                         PopupMenuItem(value: 'share', child: Text('Share to WhatsApp / Facebook')),
+                                        PopupMenuItem(value: 'edit', child: Text('Open in editing app')),
                                         PopupMenuItem(value: 'delete', child: Text('Delete')),
                                       ],
                                     ),
@@ -708,6 +731,62 @@ class _HomeScreenState extends State<HomeScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class VideoViewer extends StatefulWidget {
+  final String path;
+
+  const VideoViewer({required this.path, super.key});
+
+  @override
+  State<VideoViewer> createState() => _VideoViewerState();
+}
+
+class _VideoViewerState extends State<VideoViewer> {
+  late final VideoPlayerController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(File(widget.path))
+      ..initialize().then((_) {
+        if (mounted) setState(() {});
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_controller.value.isInitialized) {
+      return const Center(child: CircularProgressIndicator(color: Colors.white));
+    }
+    return Center(
+      child: AspectRatio(
+        aspectRatio: _controller.value.aspectRatio,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            VideoPlayer(_controller),
+            IconButton(
+              iconSize: 72,
+              color: Colors.white,
+              icon: Icon(_controller.value.isPlaying ? Icons.pause_circle : Icons.play_circle),
+              onPressed: () {
+                setState(() {
+                  _controller.value.isPlaying ? _controller.pause() : _controller.play();
+                });
+              },
             ),
           ],
         ),
