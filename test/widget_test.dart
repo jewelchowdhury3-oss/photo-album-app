@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:photo_album_app/main.dart';
 
 void main() {
-  testWidgets('App loads test', (WidgetTester tester) async {
+  testWidgets('App load test', (WidgetTester tester) async {
     await tester.pumpWidget(const ZayanMediaApp());
   });
 }

@@ -84,7 +84,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void _filterMedia(String query) {
     setState(() {
       _filteredList = _mediaList.where((item) {
-        final matchesQuery = item.title.toLowerCase().contains(query.toLowerCase());
+        final matchesQuery =
+            item.title.toLowerCase().contains(query.toLowerCase());
         final matchesFav = _showOnlyFavorites ? item.isFavorite : true;
         return matchesQuery && matchesFav;
       }).toList();
@@ -99,7 +100,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _editTitle(MediaItem item) {
-    TextEditingController titleController = TextEditingController(text: item.title);
+    TextEditingController titleController =
+        TextEditingController(text: item.title);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -128,7 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Full Screen Image Viewer with Zoom & Swipe
+  // Full Screen Viewer
   void _openImageViewer(int initialIndex) {
     PageController pageController = PageController(initialPage: initialIndex);
     Navigator.push(
@@ -151,7 +153,8 @@ class _HomeScreenState extends State<HomeScreen> {
               final item = _filteredList[index];
               return item.isVideo
                   ? const Center(
-                      child: Icon(Icons.play_circle_fill, color: Colors.white, size: 80),
+                      child: Icon(Icons.play_circle_fill,
+                          color: Colors.white, size: 80),
                     )
                   : InteractiveViewer(
                       minScale: 0.5,
@@ -279,7 +282,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   )
                 : GridView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
@@ -310,8 +314,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   children: [
                                     Positioned.fill(
                                       child: ClipRRect(
-                                        borderRadius: const BorderRadius.vertical(
-                                            top: Radius.circular(15)),
+                                        borderRadius:
+                                            const BorderRadius.vertical(
+                                                top: Radius.circular(15)),
                                         child: item.isVideo
                                             ? Container(
                                                 color: Colors.black87,
@@ -329,7 +334,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                               ),
                                       ),
                                     ),
-                                    // Favorite button overlay
                                     Positioned(
                                       top: 6,
                                       right: 6,
@@ -364,7 +368,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               Padding(
                                 padding: const EdgeInsets.all(8.0),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Expanded(
                                       child: GestureDetector(
@@ -406,7 +411,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
 
-      // Bottom Floating Buttons
+      // Bottom Buttons
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -425,7 +430,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal[600],
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
@@ -444,7 +450,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF3F51B5),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
