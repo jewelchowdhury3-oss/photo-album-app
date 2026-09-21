@@ -7,11 +7,9 @@ void main() {
     expect(find.text('Zayan\'s Media Album ❤️'), findsOneWidget);
   });
 
-  testWidgets('Media action controls are available', (WidgetTester tester) async {
+  testWidgets('Folder controls are available', (WidgetTester tester) async {
     await tester.pumpWidget(const ZayanMediaApp());
 
-    expect(find.text('Delete'), findsOneWidget);
-    expect(find.text('Edit'), findsOneWidget);
-    expect(find.text('Share'), findsOneWidget);
+    expect(find.byTooltip('Create folder'), findsOneWidget);
   });
 }

@@ -1,6 +1,9 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 void main() {
   runApp(const ZayanMediaApp());
@@ -24,17 +27,35 @@ class ZayanMediaApp extends StatelessWidget {
 }
 
 class MediaItem {
-  final String path;
+  String path;
   final bool isVideo;
   String title;
   bool isFavorite;
+  String folder;
 
   MediaItem({
     required this.path,
     required this.isVideo,
     this.title = 'Zayan-এর স্মৃতি',
     this.isFavorite = false,
+    this.folder = 'Pictures',
   });
+
+  Map<String, dynamic> toJson() => {
+        'path': path,
+        'isVideo': isVideo,
+        'title': title,
+        'isFavorite': isFavorite,
+        'folder': folder,
+      };
+
+  factory MediaItem.fromJson(Map<String, dynamic> json) => MediaItem(
+        path: json['path'] as String,
+        isVideo: json['isVideo'] as bool? ?? false,
+        title: json['title'] as String? ?? 'Zayan-এর স্মৃতি',
+        isFavorite: json['isFavorite'] as bool? ?? false,
+        folder: json['folder'] as String? ?? 'Pictures',
+      );
 }
 
 class HomeScreen extends StatefulWidget {
@@ -49,28 +70,113 @@ class _HomeScreenState extends State<HomeScreen> {
   final List<MediaItem> _mediaList = [];
   final List<MediaItem> _filteredList = [];
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _folderController = TextEditingController();
+  Directory? _albumDirectory;
+  final Set<String> _folders = {'Pictures'};
   bool _showOnlyFavorites = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAlbum();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _folderController.dispose();
+    super.dispose();
+  }
+
+  Future<Directory> _getAlbumDirectory() async {
+    final root = await getApplicationDocumentsDirectory();
+    final directory = Directory('${root.path}${Platform.pathSeparator}ZayanAlbum');
+    await directory.create(recursive: true);
+    return directory;
+  }
+
+  Future<void> _loadAlbum() async {
+    final directory = await _getAlbumDirectory();
+    final metadata = File('${directory.path}${Platform.pathSeparator}album.json');
+    if (!await metadata.exists()) {
+      if (mounted) setState(() => _albumDirectory = directory);
+      return;
+    }
+    try {
+      final decoded = jsonDecode(await metadata.readAsString()) as Map<String, dynamic>;
+      final items = (decoded['items'] as List<dynamic>? ?? [])
+          .map((item) => MediaItem.fromJson(item as Map<String, dynamic>))
+          .where((item) => File(item.path).existsSync())
+          .toList();
+      final folders = (decoded['folders'] as List<dynamic>? ?? []).whereType<String>();
+      if (!mounted) return;
+      setState(() {
+        _albumDirectory = directory;
+        _mediaList.addAll(items);
+        _folders.addAll(folders);
+        _applyFilter();
+      });
+    } catch (_) {
+      if (mounted) setState(() => _albumDirectory = directory);
+    }
+  }
+
+  Future<void> _saveAlbum() async {
+    final directory = _albumDirectory ?? await _getAlbumDirectory();
+    _albumDirectory = directory;
+    final metadata = File('${directory.path}${Platform.pathSeparator}album.json');
+    await metadata.writeAsString(jsonEncode({
+      'items': _mediaList.map((item) => item.toJson()).toList(),
+      'folders': _folders.toList(),
+    }));
+  }
 
   Future<void> _pickImages() async {
     final List<XFile> images = await _picker.pickMultiImage();
     if (images.isEmpty) return;
 
+    final imported = <MediaItem>[];
+    for (final image in images) {
+      imported.add(await _importFile(image.path, isVideo: false));
+    }
     setState(() {
-      for (var img in images) {
-        _mediaList.add(MediaItem(path: img.path, isVideo: false));
-      }
+      _mediaList.addAll(imported);
       _applyFilter();
     });
+    await _saveAlbum();
   }
 
   Future<void> _pickVideo() async {
     final XFile? video = await _picker.pickVideo(source: ImageSource.gallery);
     if (video == null) return;
 
+    final imported = await _importFile(video.path, isVideo: true);
     setState(() {
-      _mediaList.add(MediaItem(path: video.path, isVideo: true));
+      _mediaList.add(imported);
       _applyFilter();
     });
+    await _saveAlbum();
+  }
+
+  Future<MediaItem> _importFile(String sourcePath, {required bool isVideo}) async {
+    final directory = _albumDirectory ?? await _getAlbumDirectory();
+    _albumDirectory = directory;
+    final folder = Directory('${directory.path}${Platform.pathSeparator}Pictures');
+    await folder.create(recursive: true);
+    final sourceName = sourcePath.split(RegExp(r'[\\/]')).last;
+    final dot = sourceName.lastIndexOf('.');
+    final stem = dot > 0 ? sourceName.substring(0, dot) : sourceName;
+    final extension = dot > 0 ? sourceName.substring(dot) : '';
+    var destination = File('${folder.path}${Platform.pathSeparator}$sourceName');
+    var counter = 1;
+    while (await destination.exists()) {
+      destination = File(
+        '${folder.path}${Platform.pathSeparator}$stem ($counter)$extension',
+      );
+      counter++;
+    }
+    await File(sourcePath).copy(destination.path);
+    return MediaItem(path: destination.path, isVideo: isVideo);
   }
 
   void _applyFilter() {
@@ -95,10 +201,149 @@ class _HomeScreenState extends State<HomeScreen> {
     if (index < 0 || index >= _filteredList.length) return;
 
     final itemToDelete = _filteredList[index];
+    File(itemToDelete.path).delete().then<void>((_) {}, onError: (_) {});
     setState(() {
       _mediaList.remove(itemToDelete);
       _applyFilter();
     });
+    _saveAlbum();
+  }
+
+  Future<void> _renameMedia(MediaItem item) async {
+    final controller = TextEditingController(text: _fileName(item.path));
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename picture'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'File name'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Rename')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.trim().isEmpty) return;
+    final oldFile = File(item.path);
+    final extension = _extension(item.path);
+    final newName = name.trim().endsWith(extension) ? name.trim() : '${name.trim()}$extension';
+    final newPath = '${oldFile.parent.path}${Platform.pathSeparator}$newName';
+    if (newPath == item.path) return;
+    if (await File(newPath).exists()) {
+      if (mounted) _showMessage('A file with that name already exists');
+      return;
+    }
+    await oldFile.rename(newPath);
+    setState(() => item.path = newPath);
+    await _saveAlbum();
+  }
+
+  String _fileName(String path) => path.split(RegExp(r'[\\/]')).last;
+
+  String _extension(String path) {
+    final name = _fileName(path);
+    final dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(dot) : '';
+  }
+
+  Future<void> _showDetails(MediaItem item) async {
+    final file = File(item.path);
+    final size = await file.length();
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Picture details'),
+        content: SelectableText(
+          'Name: ${_fileName(item.path)}\n'
+          'Folder: ${item.folder}\n'
+          'Size: ${(size / 1024).toStringAsFixed(1)} KB\n'
+          'Location: ${item.path}',
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Future<String?> _chooseFolder({String? title}) async {
+    _folderController.clear();
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title ?? 'Choose folder'),
+        content: DropdownButtonFormField<String>(
+          initialValue: _folders.first,
+          items: _folders
+              .map((folder) => DropdownMenuItem(value: folder, child: Text(folder)))
+              .toList(),
+          onChanged: (value) => _folderController.text = value ?? _folders.first,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, _folderController.text.isEmpty ? _folders.first : _folderController.text),
+            child: const Text('Choose'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createFolder() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Create folder'),
+        content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(labelText: 'Folder name')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Create')),
+        ],
+      ),
+    );
+    controller.dispose();
+    final cleanName = name?.trim() ?? '';
+    if (cleanName.isEmpty || _folders.contains(cleanName)) return;
+    final directory = _albumDirectory ?? await _getAlbumDirectory();
+    await Directory('${directory.path}${Platform.pathSeparator}$cleanName').create(recursive: true);
+    setState(() => _folders.add(cleanName));
+    await _saveAlbum();
+  }
+
+  Future<void> _copyOrMove(MediaItem item, {required bool move}) async {
+    final folder = await _chooseFolder(title: move ? 'Move to folder' : 'Copy to folder');
+    if (folder == null) return;
+    final directory = _albumDirectory ?? await _getAlbumDirectory();
+    final targetDirectory = Directory('${directory.path}${Platform.pathSeparator}$folder');
+    await targetDirectory.create(recursive: true);
+    final targetPath = '${targetDirectory.path}${Platform.pathSeparator}${_fileName(item.path)}';
+    if (await File(targetPath).exists()) {
+      if (mounted) _showMessage('A file with that name already exists');
+      return;
+    }
+    if (move) {
+      await File(item.path).rename(targetPath);
+      setState(() {
+        item.path = targetPath;
+        item.folder = folder;
+      });
+    } else {
+      await File(item.path).copy(targetPath);
+    }
+    await _saveAlbum();
+  }
+
+  Future<void> _shareMedia(MediaItem item) async {
+    await SharePlus.instance.share(ShareParams(files: [XFile(item.path)], text: item.title));
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _editTitle(MediaItem item) {
@@ -125,6 +370,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     : controller.text.trim();
                 _applyFilter();
               });
+              _saveAlbum();
               Navigator.pop(context);
               controller.dispose();
             },
@@ -190,6 +436,11 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.create_new_folder, color: Colors.white),
+            onPressed: _createFolder,
+            tooltip: 'Create folder',
+          ),
           IconButton(
             icon: Icon(
               _showOnlyFavorites ? Icons.favorite : Icons.favorite_border,
@@ -326,6 +577,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             item.isFavorite = !item.isFavorite;
                                             _applyFilter();
                                           });
+                                          _saveAlbum();
                                         },
                                         child: Container(
                                           padding: const EdgeInsets.all(4),
@@ -367,22 +619,38 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ),
                                       ),
                                     ),
-                                    GestureDetector(
-                                      onTap: () => _editTitle(item),
-                                      child: const Icon(
-                                        Icons.edit,
-                                        color: Colors.teal,
-                                        size: 18,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    GestureDetector(
-                                      onTap: () => _deleteMedia(index),
-                                      child: const Icon(
-                                        Icons.delete,
-                                        color: Colors.redAccent,
-                                        size: 18,
-                                      ),
+                                    PopupMenuButton<String>(
+                                      icon: const Icon(Icons.more_vert, color: Colors.teal),
+                                      onSelected: (action) {
+                                        switch (action) {
+                                          case 'rename':
+                                            _renameMedia(item);
+                                            break;
+                                          case 'details':
+                                            _showDetails(item);
+                                            break;
+                                          case 'copy':
+                                            _copyOrMove(item, move: false);
+                                            break;
+                                          case 'move':
+                                            _copyOrMove(item, move: true);
+                                            break;
+                                          case 'share':
+                                            _shareMedia(item);
+                                            break;
+                                          case 'delete':
+                                            _deleteMedia(index);
+                                            break;
+                                        }
+                                      },
+                                      itemBuilder: (context) => const [
+                                        PopupMenuItem(value: 'rename', child: Text('Rename')),
+                                        PopupMenuItem(value: 'details', child: Text('Picture details')),
+                                        PopupMenuItem(value: 'copy', child: Text('Copy to folder')),
+                                        PopupMenuItem(value: 'move', child: Text('Move to folder')),
+                                        PopupMenuItem(value: 'share', child: Text('Share to WhatsApp / Facebook')),
+                                        PopupMenuItem(value: 'delete', child: Text('Delete')),
+                                      ],
                                     ),
                                   ],
                                 ),
