@@ -47,67 +47,69 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
   final List<MediaItem> _mediaList = [];
-  List<MediaItem> _filteredList = [];
+  final List<MediaItem> _filteredList = [];
   final TextEditingController _searchController = TextEditingController();
   bool _showOnlyFavorites = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _filteredList = _mediaList;
-  }
-
-  // Multi-image selection
   Future<void> _pickImages() async {
     final List<XFile> images = await _picker.pickMultiImage();
-    if (images.isNotEmpty) {
-      setState(() {
-        for (var img in images) {
-          _mediaList.add(MediaItem(path: img.path, isVideo: false));
-        }
-        _filterMedia(_searchController.text);
-      });
-    }
+    if (images.isEmpty) return;
+
+    setState(() {
+      for (var img in images) {
+        _mediaList.add(MediaItem(path: img.path, isVideo: false));
+      }
+      _applyFilter();
+    });
   }
 
-  // Video selection
   Future<void> _pickVideo() async {
     final XFile? video = await _picker.pickVideo(source: ImageSource.gallery);
-    if (video != null) {
-      setState(() {
-        _mediaList.add(MediaItem(path: video.path, isVideo: true));
-        _filterMedia(_searchController.text);
-      });
-    }
+    if (video == null) return;
+
+    setState(() {
+      _mediaList.add(MediaItem(path: video.path, isVideo: true));
+      _applyFilter();
+    });
+  }
+
+  void _applyFilter() {
+    final query = _searchController.text.trim().toLowerCase();
+
+    _filteredList
+      ..clear()
+      ..addAll(_mediaList.where((item) {
+        final matchesQuery = item.title.toLowerCase().contains(query);
+        final matchesFav = _showOnlyFavorites ? item.isFavorite : true;
+        return matchesQuery && matchesFav;
+      }));
   }
 
   void _filterMedia(String query) {
     setState(() {
-      _filteredList = _mediaList.where((item) {
-        final matchesQuery =
-            item.title.toLowerCase().contains(query.toLowerCase());
-        final matchesFav = _showOnlyFavorites ? item.isFavorite : true;
-        return matchesQuery && matchesFav;
-      }).toList();
+      _applyFilter();
     });
   }
 
   void _deleteMedia(int index) {
+    if (index < 0 || index >= _filteredList.length) return;
+
+    final itemToDelete = _filteredList[index];
     setState(() {
-      _mediaList.remove(_filteredList[index]);
-      _filterMedia(_searchController.text);
+      _mediaList.remove(itemToDelete);
+      _applyFilter();
     });
   }
 
   void _editTitle(MediaItem item) {
-    TextEditingController titleController =
-        TextEditingController(text: item.title);
+    final controller = TextEditingController(text: item.title);
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('ক্যাপশন পরিবর্তন করুন'),
         content: TextField(
-          controller: titleController,
+          controller: controller,
           decoration: const InputDecoration(hintText: 'স্মৃতির নাম লিখুন...'),
         ),
         actions: [
@@ -118,10 +120,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ElevatedButton(
             onPressed: () {
               setState(() {
-                item.title = titleController.text;
-                _filterMedia(_searchController.text);
+                item.title = controller.text.trim().isEmpty
+                    ? 'Zayan-এর স্মৃতি'
+                    : controller.text.trim();
+                _applyFilter();
               });
               Navigator.pop(context);
+              controller.dispose();
             },
             child: const Text('সংরক্ষণ'),
           ),
@@ -130,9 +135,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Full Screen Viewer
   void _openImageViewer(int initialIndex) {
-    PageController pageController = PageController(initialPage: initialIndex);
+    if (initialIndex < 0 || initialIndex >= _filteredList.length) return;
+
+    final controller = PageController(initialPage: initialIndex);
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -147,27 +154,27 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           body: PageView.builder(
-            controller: pageController,
+            controller: controller,
             itemCount: _filteredList.length,
             itemBuilder: (context, index) {
               final item = _filteredList[index];
-              return item.isVideo
-                  ? const Center(
-                      child: Icon(Icons.play_circle_fill,
-                          color: Colors.white, size: 80),
-                    )
-                  : InteractiveViewer(
-                      minScale: 0.5,
-                      maxScale: 4.0,
-                      child: Center(
-                        child: Image.file(File(item.path)),
-                      ),
-                    );
+              if (item.isVideo) {
+                return const Center(
+                  child: Icon(Icons.play_circle_fill, color: Colors.white, size: 80),
+                );
+              }
+              return InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Center(
+                  child: Image.file(File(item.path)),
+                ),
+              );
             },
           ),
         ),
       ),
-    );
+    ).then((_) => controller.dispose());
   }
 
   @override
@@ -191,7 +198,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () {
               setState(() {
                 _showOnlyFavorites = !_showOnlyFavorites;
-                _filterMedia(_searchController.text);
+                _applyFilter();
               });
             },
             tooltip: 'পছন্দের তালিকা',
@@ -200,7 +207,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Header Banner
           Container(
             width: double.infinity,
             margin: const EdgeInsets.all(16),
@@ -212,19 +218,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
             ),
             child: Column(
-              children: const [
-                Text("👑", style: TextStyle(fontSize: 40)),
-                SizedBox(height: 8),
-                Text(
+              children: [
+                const Text("👑", style: TextStyle(fontSize: 40)),
+                const SizedBox(height: 8),
+                const Text(
                   "Zayan Chowdhury",
                   style: TextStyle(
                     fontSize: 24,
@@ -232,29 +231,23 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: Colors.white,
                   ),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 4),
                 Text(
                   "আমাদের রাজপুত্রের ছবি ও ভিডিও স্মৃতিসমূহ ❤️",
-                  style: TextStyle(fontSize: 14, color: Colors.white90),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white.withValues(alpha: 0.9),
+                  ),
                 ),
               ],
             ),
           ),
-
-          // Search Bar
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(15),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.1),
-                    spreadRadius: 2,
-                    blurRadius: 8,
-                  ),
-                ],
               ),
               child: TextField(
                 controller: _searchController,
@@ -268,10 +261,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-
           const SizedBox(height: 16),
-
-          // Grid View
           Expanded(
             child: _filteredList.isEmpty
                 ? const Center(
@@ -298,13 +288,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(15),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.grey.withOpacity(0.15),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -314,9 +297,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   children: [
                                     Positioned.fill(
                                       child: ClipRRect(
-                                        borderRadius:
-                                            const BorderRadius.vertical(
-                                                top: Radius.circular(15)),
+                                        borderRadius: const BorderRadius.vertical(
+                                          top: Radius.circular(15),
+                                        ),
                                         child: item.isVideo
                                             ? Container(
                                                 color: Colors.black87,
@@ -341,7 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         onTap: () {
                                           setState(() {
                                             item.isFavorite = !item.isFavorite;
-                                            _filterMedia(_searchController.text);
+                                            _applyFilter();
                                           });
                                         },
                                         child: Container(
@@ -386,8 +369,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                     GestureDetector(
                                       onTap: () => _editTitle(item),
-                                      child: const Icon(Icons.edit,
-                                          color: Colors.teal, size: 18),
+                                      child: const Icon(
+                                        Icons.edit,
+                                        color: Colors.teal,
+                                        size: 18,
+                                      ),
                                     ),
                                     const SizedBox(width: 6),
                                     GestureDetector(
@@ -410,8 +396,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-
-      // Bottom Buttons
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -424,14 +408,14 @@ class _HomeScreenState extends State<HomeScreen> {
               label: const Text(
                 "ছবি",
                 style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16),
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal[600],
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
@@ -444,14 +428,14 @@ class _HomeScreenState extends State<HomeScreen> {
               label: const Text(
                 "ভিডিও",
                 style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16),
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF3F51B5),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
