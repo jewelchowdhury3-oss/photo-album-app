@@ -1,0 +1,14 @@
+import 'package:image_picker/image_picker.dart';
+
+final ImagePicker _picker = ImagePicker();
+List<XFile> _selectedImages = [];
+
+Future<void> pickMultipleImages() async {
+  final List<XFile> images = await _picker.pickMultiImage();
+  
+  if (images.isNotEmpty) {
+    setState(() {
+      _selectedImages.addAll(images);
+    });
+  }
+}
