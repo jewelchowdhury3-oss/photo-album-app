@@ -1,14 +1,37 @@
-import 'package:image_picker/image_picker.dart';
+name: Build Flutter APK
 
-final ImagePicker _picker = ImagePicker();
-List<XFile> _selectedImages = [];
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-Future<void> pickMultipleImages() async {
-  final List<XFile> images = await _picker.pickMultiImage();
-  
-  if (images.isNotEmpty) {
-    setState(() {
-      _selectedImages.addAll(images);
-    });
-  }
-}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Release APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
